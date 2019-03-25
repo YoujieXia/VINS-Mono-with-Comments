@@ -33,7 +33,9 @@ void Estimator::clearState()
         angular_velocity_buf[i].clear();
 
         if (pre_integrations[i] != nullptr)
+        {
             delete pre_integrations[i];
+        }
         pre_integrations[i] = nullptr;
     }
 
@@ -41,15 +43,6 @@ void Estimator::clearState()
     {
         tic[i] = Vector3d::Zero();
         ric[i] = Matrix3d::Identity();
-    }
-
-    for (auto &it : all_image_frame)
-    {
-        if (it.second.pre_integration != nullptr)
-        {
-            delete it.second.pre_integration;
-            it.second.pre_integration = nullptr;
-        }
     }
 
     solver_flag = INITIAL;
@@ -119,17 +112,17 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
 
 void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, const std_msgs::Header &header)
 {
-    ROS_DEBUG("new image coming ------------------------------------------");
-    ROS_DEBUG("Adding feature points %lu", image.size());
+    ROS_INFO("new image coming ------------------------------------------");
+    ROS_INFO("Adding feature points %lu", image.size());
     if (f_manager.addFeatureCheckParallax(frame_count, image, td))
         marginalization_flag = MARGIN_OLD;
     else
         marginalization_flag = MARGIN_SECOND_NEW;
 
-    ROS_DEBUG("this frame is--------------------%s", marginalization_flag ? "reject" : "accept");
-    ROS_DEBUG("%s", marginalization_flag ? "Non-keyframe" : "Keyframe");
-    ROS_DEBUG("Solving %d", frame_count);
-    ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
+    ROS_INFO("this frame is--------------------%s", marginalization_flag ? "reject" : "accept");
+    ROS_INFO("%s", marginalization_flag ? "Non-keyframe" : "Keyframe");
+    ROS_INFO("Solving %d", frame_count);
+    ROS_INFO("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
 
     ImageFrame imageframe(image, header.stamp.toSec());
@@ -163,6 +156,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
             if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1)
             {
                result = initialStructure();
+               ROS_WARN_STREAM("call initialStructure() result: " << result);
                initial_timestamp = header.stamp.toSec();
             }
             if(result)
@@ -215,10 +209,25 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         last_P0 = Ps[0];
     }
 }
+
+/* 
+ * @brief initialize the SfM
+ * 
+ * 1. guarantee IMU with enough excitation ??? 
+ * 2. select out the frame having the most covisible points and enough parallax with the last frame,
+ * and use these two frame and 5-pt method to recover relative pose and 3D feature points
+ * 3. sfm.construct, global sfm, recover the curren frame pose in the sliding window
+ * 4. recover other frames using PnP
+ * 5. align vision-only SfM and IMU
+ * 6. initialize varaiables with reasonable values in sliding window
+ */
+
+
 bool Estimator::initialStructure()
 {
     TicToc t_sfm;
     //check imu observibility
+    // 1. guarantee IMU with enough excitation
     {
         map<double, ImageFrame>::iterator frame_it;
         Vector3d sum_g;
@@ -250,7 +259,7 @@ bool Estimator::initialStructure()
     Quaterniond Q[frame_count + 1];
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
-    vector<SFMFeature> sfm_f;
+    vector<SFMFeature> sfm_f; // 3D feature points
     for (auto &it_per_id : f_manager.feature)
     {
         int imu_j = it_per_id.start_frame - 1;
@@ -265,25 +274,40 @@ bool Estimator::initialStructure()
         }
         sfm_f.push_back(tmp_feature);
     } 
+
+    ROS_WARN_STREAM("sfm_f size " << sfm_f.size());
+
     Matrix3d relative_R;
     Vector3d relative_T;
     int l;
+    // 2. select out the frame having the most covisible points and enough parallax with the last frame,
+    // and use these two frame and 5-pt method to recover relative pose and 3D feature points
     if (!relativePose(relative_R, relative_T, l))
     {
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
+
+    ROS_WARN_STREAM("frame index l " << l);
+    ROS_WARN_STREAM("relative_R " << relative_R);
+    ROS_WARN_STREAM("relative_T " << relative_T);
+
+    ROS_WARN_STREAM("frame_count + 1: " << (frame_count + 1));
+
+    // 3. sfm.construct, global sfm, initialize all frames' poses and features' 3D positions
     GlobalSFM sfm;
     if(!sfm.construct(frame_count + 1, Q, T, l,
               relative_R, relative_T,
               sfm_f, sfm_tracked_points))
     {
-        ROS_DEBUG("global SFM failed!");
+        ROS_INFO("global SFM failed!");
         marginalization_flag = MARGIN_OLD;
         return false;
     }
 
     //solve pnp for all frame
+    // 4. for all frames not in the window, give each of them an intial R and T,
+    // and solve pnp to obtain poses
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
@@ -333,12 +357,12 @@ bool Estimator::initialStructure()
         if(pts_3_vector.size() < 6)
         {
             cout << "pts_3_vector size " << pts_3_vector.size() << endl;
-            ROS_DEBUG("Not enough points for solve pnp !");
+            ROS_INFO("Not enough points for solve pnp !");
             return false;
         }
         if (! cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1))
         {
-            ROS_DEBUG("solve pnp fail!");
+            ROS_INFO("solve pnp fail!");
             return false;
         }
         cv::Rodrigues(rvec, r);
@@ -351,6 +375,7 @@ bool Estimator::initialStructure()
         frame_it->second.R = R_pnp * RIC[0].transpose();
         frame_it->second.T = T_pnp;
     }
+    // 5. align vision-only SfM and IMU
     if (visualInitialAlign())
         return true;
     else
@@ -360,6 +385,20 @@ bool Estimator::initialStructure()
     }
 
 }
+
+
+/*
+ * @brief align vision-only SfM and IMU
+ *
+ * Ps: translation under world frame
+ * Rs: rotation under world frame
+ * Vs: velocity under worldo frame, V[0:n]
+ * Bgs: groscope bias
+ * g: gravity
+ * s: scale
+ *
+ * if Bgs is changed，we need repropagate IMU measurements.
+ */
 
 bool Estimator::visualInitialAlign()
 {
@@ -388,7 +427,7 @@ bool Estimator::visualInitialAlign()
         dep[i] = -1;
     f_manager.clearDepth(dep);
 
-    //triangulat on cam pose , no tic
+    //triangulat on cam pose, no tic
     Vector3d TIC_TMP[NUM_OF_CAM];
     for(int i = 0; i < NUM_OF_CAM; i++)
         TIC_TMP[i].setZero();
@@ -439,9 +478,12 @@ bool Estimator::visualInitialAlign()
     return true;
 }
 
+/*
+ * @brief guarantee enough correspondance and parallax
+ */
 bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
-    // find previous frame which contians enough correspondance and parallex with newest frame
+    // find previous frame which contians enough correspondance and parallax with newest frame
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
@@ -459,16 +501,27 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 
             }
             average_parallax = 1.0 * sum_parallax / int(corres.size());
+
+            ROS_WARN_STREAM("i " << i);
+            ROS_WARN_STREAM("average_parallax " << average_parallax);
+
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;
-                ROS_DEBUG("average_parallax %f choose l %d and newest frame to triangulate the whole structure", average_parallax * 460, l);
+                ROS_WARN_STREAM("l " << i);
+                ROS_INFO("average_parallax %f choose l %d and newest frame to triangulate the whole structure", average_parallax * 460, l);
                 return true;
             }
         }
     }
     return false;
 }
+
+/*
+ * @brief triangulate features and then optimize SfM
+ *
+ * tic, ric: camera to IMU extrincs
+ */
 
 void Estimator::solveOdometry()
 {
@@ -483,6 +536,7 @@ void Estimator::solveOdometry()
     }
 }
 
+// transfer to ceres format
 void Estimator::vector2double()
 {
     for (int i = 0; i <= WINDOW_SIZE; i++)
@@ -666,6 +720,16 @@ bool Estimator::failureDetection()
     return false;
 }
 
+/*
+ * @brief nonlinear opt for sliding window
+ *
+ * 1. add opt variables: 15 DoF
+ *      window position:    para_Pose[0:n]
+ *      velocity and bias:  para_SpeedBias
+ *      IMU extrinsics (optional)
+ * 2. add residual terms: prior + IMU + visual + close loop
+ * 3. marginization, due to ??? whether the 2nd last frame is keyframe
+ */
 
 void Estimator::optimization()
 {
@@ -673,12 +737,16 @@ void Estimator::optimization()
     ceres::LossFunction *loss_function;
     //loss_function = new ceres::HuberLoss(1.0);
     loss_function = new ceres::CauchyLoss(1.0);
+    // add sliding window frame's states: (pose, v, q, ba, bg)
+    // ceres format: double vector
+    // vector2double: `Ps Vs Bgs Bas` to `para_Pose para_SpeedBias`
     for (int i = 0; i < WINDOW_SIZE + 1; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
         problem.AddParameterBlock(para_Pose[i], SIZE_POSE, local_parameterization);
         problem.AddParameterBlock(para_SpeedBias[i], SIZE_SPEEDBIAS);
     }
+    // add IMU extrinsics
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
@@ -700,6 +768,7 @@ void Estimator::optimization()
     TicToc t_whole, t_prepare;
     vector2double();
 
+    // ???
     if (last_marginalization_info)
     {
         // construct new marginlization_factor
@@ -708,6 +777,8 @@ void Estimator::optimization()
                                  last_marginalization_parameter_blocks);
     }
 
+    // add IMU residual term
+    // coefficient: IMU preintegration covariance (IMUFactor: Evaluate, add IMU covar, compute jacobian matrix)
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         int j = i + 1;
@@ -718,6 +789,9 @@ void Estimator::optimization()
     }
     int f_m_cnt = 0;
     int feature_index = -1;
+
+    // add visual residual term
+    // coefficient: f/1.5
     for (auto &it_per_id : f_manager.feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -766,6 +840,8 @@ void Estimator::optimization()
     ROS_DEBUG("visual measurement count: %d", f_m_cnt);
     ROS_DEBUG("prepare for ceres: %f", t_prepare.toc());
 
+    // loop closing factor
+    // add loop parameters and residual
     if(relocalization_info)
     {
         //printf("set relocalization factor! \n");
@@ -823,6 +899,13 @@ void Estimator::optimization()
     double2vector();
 
     TicToc t_whole_marginalization;
+    //margin部分，如果倒数第二帧是关键帧：
+    //1.把之前的存的残差部分加进来
+    //2.把与当前要margin掉帧所有相关的残差项都加进来，IMU,vision
+    //3.preMarginalize-> 调用Evaluate计算所有ResidualBlock的残差，parameter_block_data parameter_block_idx parameter_block_size是marinazation中存参数块的容器(unordered_map),key都是addr,
+    //分别对应这些参数的data，在稀疏矩阵A中的index(要被margin掉的参数会被移到前面)，A中的大小
+    //4.Marginalize->多线程构造Hx=b的结构，H是边缘化后的结果，First Esitimate Jacobian,在X0处线性化
+    //5.margin结束，调整参数块在下一次window中对应的位置（往前移一格），注意这里是指针，后面slideWindow中会赋新值，这里只是提前占座（知乎上有人问：https://www.zhihu.com/question/63754583/answer/259699612）
     if (marginalization_flag == MARGIN_OLD)
     {
         MarginalizationInfo *marginalization_info = new MarginalizationInfo();
@@ -930,6 +1013,11 @@ void Estimator::optimization()
         last_marginalization_parameter_blocks = parameter_blocks;
         
     }
+    //如果倒数第二帧不是关键帧
+    //1.保留该帧的IMU测量，margin该帧的visual
+    //2.premargin
+    //3.marginalize
+    //4.滑动窗口移动（去掉倒数第二个）
     else
     {
         if (last_marginalization_info &&
@@ -1002,12 +1090,12 @@ void Estimator::optimization()
     ROS_DEBUG("whole time for ceres: %f", t_whole.toc());
 }
 
+//实际滑动窗口的地方，如果第二最新帧是关键帧的话，那么这个关键帧就会留在滑动窗口中，时间最长的一帧和其测量值就会被边缘化掉如果第二最新帧不是关键帧的话，则把这帧的视觉测量舍弃掉而保留IMU测量值在滑动窗口中这样的策略会保证系统的稀疏性
 void Estimator::slideWindow()
 {
     TicToc t_margin;
     if (marginalization_flag == MARGIN_OLD)
     {
-        double t_0 = Headers[0].stamp.toSec();
         back_R0 = Rs[0];
         back_P0 = Ps[0];
         if (frame_count == WINDOW_SIZE)
@@ -1044,20 +1132,11 @@ void Estimator::slideWindow()
 
             if (true || solver_flag == INITIAL)
             {
+                double t_0 = Headers[0].stamp.toSec();
                 map<double, ImageFrame>::iterator it_0;
                 it_0 = all_image_frame.find(t_0);
                 delete it_0->second.pre_integration;
-                it_0->second.pre_integration = nullptr;
- 
-                for (map<double, ImageFrame>::iterator it = all_image_frame.begin(); it != it_0; ++it)
-                {
-                    if (it->second.pre_integration)
-                        delete it->second.pre_integration;
-                    it->second.pre_integration = NULL;
-                }
-
                 all_image_frame.erase(all_image_frame.begin(), it_0);
-                all_image_frame.erase(t_0);
 
             }
             slideWindowOld();
@@ -1098,6 +1177,8 @@ void Estimator::slideWindow()
         }
     }
 }
+
+//根据margin滑动窗口结果处理特征点出现的帧号
 
 // real marginalization is removed in solve_ceres()
 void Estimator::slideWindowNew()

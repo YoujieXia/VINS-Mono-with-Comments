@@ -218,6 +218,11 @@ bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &co
 
         Rotation = R.transpose();
         Translation = -R.transpose() * T;
+
+        ROS_WARN_STREAM("Rotation  " << Rotation);
+        ROS_WARN_STREAM("Translation  " << Translation);
+        ROS_WARN_STREAM("inlier_cnt  " << inlier_cnt);
+
         if(inlier_cnt > 12)
             return true;
         else

@@ -2,6 +2,10 @@
 
 int FeatureTracker::n_id = 0;
 
+/**
+ * @ breif  determine whether feature locates in the image region or not
+ */
+
 bool inBorder(const cv::Point2f &pt)
 {
     const int BORDER_SIZE = 1;
@@ -9,6 +13,10 @@ bool inBorder(const cv::Point2f &pt)
     int img_y = cvRound(pt.y);
     return BORDER_SIZE <= img_x && img_x < COL - BORDER_SIZE && BORDER_SIZE <= img_y && img_y < ROW - BORDER_SIZE;
 }
+
+/**
+ * @ breif  kick out features that could not be tracked
+ */
 
 void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
 {
@@ -18,6 +26,10 @@ void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
             v[j++] = v[i];
     v.resize(j);
 }
+
+/**
+ * @ breif  kick out features that could not be tracked
+ */
 
 void reduceVector(vector<int> &v, vector<uchar> status)
 {
@@ -32,6 +44,12 @@ void reduceVector(vector<int> &v, vector<uchar> status)
 FeatureTracker::FeatureTracker()
 {
 }
+
+/**
+ * @ breif  sort features tracked by KLT optical flow and maintain those with high frequencies
+ *
+ * if use fisheye, mask will filter out some points 
+ */
 
 void FeatureTracker::setMask()
 {
@@ -68,6 +86,10 @@ void FeatureTracker::setMask()
     }
 }
 
+/**
+ * @ breif  add new feature points to forw_pts
+ */
+
 void FeatureTracker::addPoints()
 {
     for (auto &p : n_pts)
@@ -77,6 +99,18 @@ void FeatureTracker::addPoints()
         track_cnt.push_back(1);
     }
 }
+
+/**
+ * @ breif  track features in the new image using KLT optical flow
+ *
+ * createCLAHE(): adaptive histogram equalization
+ * calcOpticalFlowPyrLK(): LK pyramid optical flow
+ * rejectWithF()
+ * setMask()
+ * goodFeaturesToTrack()
+ * addPoints()
+ * undistortedPoints()
+ */
 
 void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 {
@@ -112,6 +146,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         vector<float> err;
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
+        // kick out points with poor tracking status
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
                 status[i] = 0;
@@ -124,11 +159,14 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
 
+    // if the point could be tracked, then its track count adds 1
+    // better features, larger track_cnt
     for (auto &n : track_cnt)
         n++;
 
     if (PUB_THIS_FRAME)
     {
+        // kick out outliers with Fundamental Matrix - RANSAC
         rejectWithF();
         ROS_DEBUG("set mask begins");
         TicToc t_m;
@@ -166,6 +204,11 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     prev_time = cur_time;
 }
 
+/**
+ * @ breif  Fundamental Matrix (8-pt) - RANSAC
+ *          to remove outliers
+ */
+
 void FeatureTracker::rejectWithF()
 {
     if (forw_pts.size() >= 8)
@@ -201,6 +244,10 @@ void FeatureTracker::rejectWithF()
     }
 }
 
+/**
+ * @ breif  update feature's id
+ */
+
 bool FeatureTracker::updateID(unsigned int i)
 {
     if (i < ids.size())
@@ -213,11 +260,19 @@ bool FeatureTracker::updateID(unsigned int i)
         return false;
 }
 
+/**
+ * @ breif  input intrinsics from file
+ */
+
 void FeatureTracker::readIntrinsicParameter(const string &calib_file)
 {
     ROS_INFO("reading paramerter of camera %s", calib_file.c_str());
     m_camera = CameraFactory::instance()->generateCameraFromYamlFile(calib_file);
 }
+
+/**
+ * @ breif  visualize undistorted features
+ */
 
 void FeatureTracker::showUndistortion(const string &name)
 {
@@ -254,6 +309,10 @@ void FeatureTracker::showUndistortion(const string &name)
     cv::imshow(name, undistortedImg);
     cv::waitKey(0);
 }
+
+/**
+ * @ breif  calculate 2D features on the image plane
+ */
 
 void FeatureTracker::undistortedPoints()
 {

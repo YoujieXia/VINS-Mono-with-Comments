@@ -19,7 +19,7 @@ using namespace Eigen;
 using namespace std;
 using namespace DVision;
 
-
+// The functor extracts BRIEF descriptors in the required format
 class BriefExtractor
 {
 public:

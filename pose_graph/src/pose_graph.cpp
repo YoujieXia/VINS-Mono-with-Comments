@@ -375,7 +375,8 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         int min_index = -1;
         for (unsigned int i = 0; i < ret.size(); i++)
         {
-            if (min_index == -1 || (ret[i].Id < min_index && ret[i].Score > 0.015))
+            //if (min_index == -1 || (ret[i].Id < min_index && ret[i].Score > 0.015))
+            if (min_index == -1 || (ret[i].Id < static_cast<unsigned int>(min_index) && ret[i].Score > 0.015))
                 min_index = ret[i].Id;
         }
         return min_index;
@@ -881,7 +882,6 @@ void PoseGraph::publish()
             posegraph_visualization->publish_by(pub_pose_graph, path[sequence_cnt].header);
         }
     }
-    base_path.header.frame_id = "world";
     pub_base_path.publish(base_path);
     //posegraph_visualization->publish_by(pub_pose_graph, path[sequence_cnt].header);
 }

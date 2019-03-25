@@ -16,6 +16,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
     IMUFactor(IntegrationBase* _pre_integration):pre_integration(_pre_integration)
     {
     }
+    // IMU residual in ceres structure
     virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
     {
 

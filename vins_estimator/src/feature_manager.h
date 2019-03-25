@@ -28,6 +28,10 @@ class FeaturePerFrame
         velocity.x() = _point(5); 
         velocity.y() = _point(6); 
         cur_td = td;
+        // fix uninitialization warning
+        z = 0.0;
+        is_used = false;
+        parallax = 0.0;
     }
     double cur_td;
     Vector3d point;

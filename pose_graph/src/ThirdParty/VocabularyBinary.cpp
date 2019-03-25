@@ -3,7 +3,7 @@
 using namespace std;
 
 VINSLoop::Vocabulary::Vocabulary()
-: nNodes(0), nodes(nullptr), nWords(0), words(nullptr) {
+: nNodes(0), nWords(0), nodes(nullptr), words(nullptr) {
 }
 
 VINSLoop::Vocabulary::~Vocabulary() {

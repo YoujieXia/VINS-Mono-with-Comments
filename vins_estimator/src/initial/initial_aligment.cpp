@@ -1,7 +1,11 @@
 #include "initial_alignment.h"
 
+// refer to SfM results to calibrate bgs, then repropagate
 void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
 {
+    // for (int i = 0; i <= WINDOW_SIZE; i++) {
+    //     ROS_WARN_STREAM("gyroscope bias bgs[i]:" << Bgs[i]);
+    // }
     Matrix3d A;
     Vector3d b;
     Vector3d delta_bg;
@@ -9,9 +13,22 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
     b.setZero();
     map<double, ImageFrame>::iterator frame_i;
     map<double, ImageFrame>::iterator frame_j;
+    // int idx = 0;
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++)
     {
         frame_j = next(frame_i);
+
+        // if (frame_i == all_image_frame.begin()) {
+        //     ROS_WARN_STREAM("frame i double " << frame_i->first);
+        //     for (auto m : frame_i->second.points) {
+        //         ROS_WARN_STREAM("frame i ImageFrame " << m.first);
+        //         for (auto v : m.second) {
+        //             ROS_WARN_STREAM("frame i int " << v.first);
+        //             ROS_WARN_STREAM("frame i 7 nums " << v.second);
+        //         }
+        //     }
+        // }
+
         MatrixXd tmp_A(3, 3);
         tmp_A.setZero();
         VectorXd tmp_b(3);
@@ -21,13 +38,19 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
         A += tmp_A.transpose() * tmp_A;
         b += tmp_A.transpose() * tmp_b;
-
+        // ROS_WARN_STREAM("frame id " << idx++);
+        // ROS_WARN_STREAM("A" << A);
+        // ROS_WARN_STREAM("b" << b);
     }
+    ROS_WARN_STREAM("A" << A);
+    ROS_WARN_STREAM("b" << b);
     delta_bg = A.ldlt().solve(b);
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
-    for (int i = 0; i <= WINDOW_SIZE; i++)
+    for (int i = 0; i <= WINDOW_SIZE; i++) {
         Bgs[i] += delta_bg;
+        // ROS_WARN_STREAM("gyroscope bias bgs[i]:" << Bgs[i]);
+    }
 
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
     {
@@ -36,7 +59,7 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
     }
 }
 
-
+// find b1 b2 (orthogonal basis) on sphere with radius G
 MatrixXd TangentBasis(Vector3d &g0)
 {
     Vector3d b, c;
@@ -52,6 +75,7 @@ MatrixXd TangentBasis(Vector3d &g0)
     return bc;
 }
 
+// V-B-3
 void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     Vector3d g0 = g.normalized() * G.norm();
@@ -122,6 +146,9 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
     g = g0;
 }
 
+// V-B-2: V[0:n], gravity vector g, scale s
+// V-B-3: gravity refinement
+// gravity aligns Z-axis in the world frame
 bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     int all_frame_count = all_image_frame.size();
@@ -198,8 +225,10 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 
 bool VisualIMUAlignment(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)
 {
+    // V-B-1
     solveGyroscopeBias(all_image_frame, Bgs);
 
+    // obtain V, g, s
     if(LinearAlignment(all_image_frame, g, x))
         return true;
     else 

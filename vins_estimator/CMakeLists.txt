@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(vins_estimator)
 
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_CXX_FLAGS "-std=c++11")
 #-DEIGEN_USE_MKL_ALL")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+# set(CMAKE_CXX_FLAGS_DEBUG "-Wall -g")
+set(CMAKE_CXX_FLAGS_DEBUG  "-O0 -Wall -g")
 
 find_package(catkin REQUIRED COMPONENTS
     roscpp
@@ -17,7 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(OpenCV REQUIRED)
 
-# message(WARNING "OpenCV_VERSION: ${OpenCV_VERSION}")
+message(WARNING "OpenCV_VERSION: ${OpenCV_VERSION}")
 
 find_package(Ceres REQUIRED)
 

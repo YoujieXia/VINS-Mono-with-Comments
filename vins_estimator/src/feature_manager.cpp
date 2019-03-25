@@ -41,6 +41,9 @@ int FeatureManager::getFeatureCount()
     return cnt;
 }
 
+/*
+ * @brief collect features and check parallax
+ */
 
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, double td)
 {
