@@ -73,7 +73,7 @@ MarginalizationInfo::~MarginalizationInfo()
     //ROS_WARN("release marginlizationinfo");
     
     for (auto it = parameter_block_data.begin(); it != parameter_block_data.end(); ++it)
-        delete it->second;
+        delete[] it->second;
 
     for (int i = 0; i < (int)factors.size(); i++)
     {
@@ -107,8 +107,6 @@ void MarginalizationInfo::addResidualBlockInfo(ResidualBlockInfo *residual_block
     }
 }
 
-// Evaluate(): calculate four residual terms
-// copy `parameter_blocks` to `parameter_block_data` container
 void MarginalizationInfo::preMarginalize()
 {
     for (auto it : factors)
@@ -140,7 +138,6 @@ int MarginalizationInfo::globalSize(int size) const
     return size == 6 ? 7 : size;
 }
 
-// multi-threads to construct marginalization matrix H
 void* ThreadsConstructA(void* threadsstruct)
 {
     ThreadsStruct* p = ((ThreadsStruct*)threadsstruct);
@@ -174,10 +171,6 @@ void* ThreadsConstructA(void* threadsstruct)
     return threadsstruct;
 }
 
-// marginalization
-// multi-threads to construct Hx = b, H is the result of marginalization
-// Schur complement
-// First-Estimates Jacobian, linearize at fixed point X0
 void MarginalizationInfo::marginalize()
 {
     int pos = 0;
@@ -294,11 +287,6 @@ void MarginalizationInfo::marginalize()
     Eigen::VectorXd S_sqrt = S.cwiseSqrt();
     Eigen::VectorXd S_inv_sqrt = S_inv.cwiseSqrt();
 
-    // Why FEJ?
-    //http://blog.csdn.net/heyijia0327/article/details/53707261 DSO 中的Windowed Optimization
-    //https://mp.weixin.qq.com/s?__biz=MzI5MTM1MTQwMw==&mid=2247486797&idx=1&sn=6ae98c0c52ce74ddb5cdc17f3e0113b7&chksm=ec10b349db673a5fdc7c9db385eb39efc0a9724519a8ece8ce5dbe504d33e4ba099dafbcc65f&mpshare=1&scene=24&srcid=1113T4dVqwLiyL4XDMDerW4Z#rd
-    //OKVIS理论推导（下） SLAM中的marginalization 和 Schur complement
-    //http://blog.csdn.net/heyijia0327/article/details/52822104
     linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();
     linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;
     //std::cout << A << std::endl
@@ -342,8 +330,6 @@ MarginalizationFactor::MarginalizationFactor(MarginalizationInfo* _marginalizati
     set_num_residuals(marginalization_info->n);
 };
 
-// prior residual
-// 1. due to FEJ, fix linearization point, update residuals and Jacobian
 bool MarginalizationFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
     //printf("internal addr,%d, %d\n", (int)parameter_block_sizes().size(), num_residuals());

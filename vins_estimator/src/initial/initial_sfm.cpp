@@ -1,7 +1,5 @@
 #include "initial_sfm.h"
 
-#include <ros/console.h>
-
 GlobalSFM::GlobalSFM(){}
 
 void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
@@ -73,7 +71,6 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 
 }
 
-// triangulate all features in two frames and insert into stm_f
 void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Pose0, 
 									 int frame1, Eigen::Matrix<double, 3, 4> &Pose1,
 									 vector<SFMFeature> &sfm_f)
@@ -81,7 +78,7 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 	assert(frame0 != frame1);
 	for (int j = 0; j < feature_num; j++)
 	{
-		if (sfm_f[j].state == true) // sucessful triangulation
+		if (sfm_f[j].state == true)
 			continue;
 		bool has_0 = false, has_1 = false;
 		Vector2d point0;
@@ -165,10 +162,8 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		{
 			Matrix3d R_initial = c_Rotation[i - 1];
 			Vector3d P_initial = c_Translation[i - 1];
-			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f)) {
-				ROS_INFO("solveFrameByPnP before frame l failed!");
+			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))
 				return false;
-			}
 			c_Rotation[i] = R_initial;
 			c_Translation[i] = P_initial;
 			c_Quat[i] = c_Rotation[i];
@@ -189,10 +184,8 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		//solve pnp
 		Matrix3d R_initial = c_Rotation[i + 1];
 		Vector3d P_initial = c_Translation[i + 1];
-		if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f)) {
-			ROS_INFO("solveFrameByPnP after frame l failed!");
+		if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))
 			return false;
-		}
 		c_Rotation[i] = R_initial;
 		c_Translation[i] = P_initial;
 		c_Quat[i] = c_Rotation[i];
@@ -281,22 +274,17 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	ceres::Solver::Options options;
 	options.linear_solver_type = ceres::DENSE_SCHUR;
 	//options.minimizer_progress_to_stdout = true;
-	options.max_solver_time_in_seconds = 0.2;  //0.2
+	options.max_solver_time_in_seconds = 0.2;
 	ceres::Solver::Summary summary;
 	ceres::Solve(options, &problem, &summary);
 	//std::cout << summary.BriefReport() << "\n";
-
-	ROS_WARN_STREAM("ceres report    " << summary.BriefReport() );
-
-	if (summary.termination_type == ceres::CONVERGENCE || summary.final_cost < 5e-03) //5e-03
+	if (summary.termination_type == ceres::CONVERGENCE || summary.final_cost < 5e-03)
 	{
 		//cout << "vision only BA converge" << endl;
-		ROS_INFO("vision only BA converge");
 	}
 	else
 	{
 		//cout << "vision only BA not converge " << endl;
-		ROS_INFO("vision only BA not converge");
 		return false;
 	}
 	for (int i = 0; i < frame_num; i++)

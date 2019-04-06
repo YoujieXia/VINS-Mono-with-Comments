@@ -35,7 +35,6 @@ class IntegrationBase
         propagate(dt, acc, gyr);
     }
 
-    // if bias changes not a bit during opt, we need new bias to re-calculate preintegration
     void repropagate(const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)
     {
         sum_dt = 0.0;
@@ -52,7 +51,6 @@ class IntegrationBase
             propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);
     }
 
-    // mid intergation: https://www.zhihu.com/question/64381223/answer/255818747
     void midPointIntegration(double _dt, 
                             const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,
                             const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,
@@ -79,7 +77,6 @@ class IntegrationBase
             Vector3d a_1_x = _acc_1 - linearized_ba;
             Matrix3d R_w_x, R_a_0_x, R_a_1_x;
 
-            // skew-symmetric matrix
             R_w_x<<0, -w_x(2), w_x(1),
                 w_x(2), 0, -w_x(0),
                 -w_x(1), w_x(0), 0;
@@ -130,10 +127,6 @@ class IntegrationBase
 
     }
 
-
-    // integrate IMU derivations between two camera keyframes, including
-    // delta_p, delta_q, delta_v, biaslinearized_ba, biaslinearized_bg,
-    // maintain preintegration's Jacobian and Covariance, and other necessary opt parameters 
     void propagate(double _dt, const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1)
     {
         dt = _dt;
