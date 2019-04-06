@@ -16,16 +16,13 @@ PoseGraph::PoseGraph()
     sequence_cnt = 0;
     sequence_loop.push_back(0);
     base_sequence = 1;
-
 }
 
-PoseGraph::~PoseGraph()
-{
+PoseGraph::~PoseGraph() {
 	t_optimization.join();
 }
 
-void PoseGraph::registerPub(ros::NodeHandle &n)
-{
+void PoseGraph::registerPub(ros::NodeHandle &n) {
     pub_pg_path = n.advertise<nav_msgs::Path>("pose_graph_path", 1000);
     pub_base_path = n.advertise<nav_msgs::Path>("base_path", 1000);
     pub_pose_graph = n.advertise<visualization_msgs::MarkerArray>("pose_graph", 1000);

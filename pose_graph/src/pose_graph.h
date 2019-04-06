@@ -32,8 +32,7 @@
 using namespace DVision;
 using namespace DBoW2;
 
-class PoseGraph
-{
+class PoseGraph {
 public:
 	PoseGraph();
 	~PoseGraph();
@@ -49,12 +48,15 @@ public:
 	void savePoseGraph();
 	void loadPoseGraph();
 	void publish();
-	Vector3d t_drift;
 	double yaw_drift;
+
+	// YJTODO: mean?
 	Matrix3d r_drift;
+	Vector3d t_drift;
 	// world frame( base sequence or first sequence)<----> cur sequence frame  
-	Vector3d w_t_vio;
 	Matrix3d w_r_vio;
+	Vector3d w_t_vio;
+	
 
 
 private:
