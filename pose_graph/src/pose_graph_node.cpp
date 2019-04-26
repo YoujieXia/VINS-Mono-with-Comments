@@ -1,5 +1,13 @@
+
+
 #include <vector>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <thread>
+
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <sensor_msgs/PointCloud.h>
@@ -7,61 +15,67 @@
 #include <sensor_msgs/image_encodings.h>
 #include <visualization_msgs/Marker.h>
 #include <std_msgs/Bool.h>
-#include <cv_bridge/cv_bridge.h>
-#include <iostream>
-#include <ros/package.h>
-#include <mutex>
-#include <queue>
-#include <thread>
-#include <eigen3/Eigen/Dense>
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/eigen.hpp>
-#include "keyframe.h"
-#include "utility/tic_toc.h"
-#include "pose_graph.h"
-#include "utility/CameraPoseVisualization.h"
+#include <cv_bridge/cv_bridge.h>
+
+#include <eigen3/Eigen/Dense>
+
 #include "parameters.h"
-#define SKIP_FIRST_CNT 10
+#include "pose_graph.h"
+#include "keyframe.h"
+
+#include "utility/tic_toc.h"
+#include "utility/CameraPoseVisualization.h"
+
+#define SKIP_FIRST_CNT 10                           // skip first 10 keyframes
+
 using namespace std;
 
 queue<sensor_msgs::ImageConstPtr> image_buf;        // raw images
-queue<sensor_msgs::PointCloudConstPtr> point_buf;   //
+queue<sensor_msgs::PointCloudConstPtr> point_buf;   // feature points
 queue<nav_msgs::Odometry::ConstPtr> pose_buf;       //
-queue<Eigen::Vector3d> odometry_buf;                //
+queue<Eigen::Vector3d> odometry_buf;                // add by vio_callback
 
-std::mutex m_buf;
-std::mutex m_process;
+std::mutex m_buf;         // lock img/pts/pose/odom buffers
+std::mutex m_process;     // lock loading/saving pose graph
 
-PoseGraph posegraph;
+PoseGraph posegraph;  // YJTODO: move to init
 
-int frame_index  = 0;
-int sequence = 1;
-int skip_first_cnt = 0;
-int SKIP_CNT;
-int skip_cnt = 0;
-bool start_flag = 0;
-double SKIP_DIS = 0;
+int frame_index = 0;  // detected keyframe index
+int sequence = 1;   //number of independent sequence
+
+int skip_first_cnt = 0; // used in local, with SKIP_FIRST_CNT, only once it achieves
+int SKIP_CNT;  // read from config::skip_cnt
+int skip_cnt = 0; // with SKIP_CNT to ctrl freq, in loop
+
+// bool start_flag = 0;  // successfully detect the first keyframe
+double SKIP_DIS = 0;  // dis to last frame 
 double last_image_time = -1.0;
+
+int ROW;
+int COL;
+int DEBUG_IMAGE;  // save image, to check overlapping?
 
 int VISUALIZATION_SHIFT_X;
 int VISUALIZATION_SHIFT_Y;
-int ROW;
-int COL;
-int DEBUG_IMAGE;
 int VISUALIZE_IMU_FORWARD;
+
 int LOOP_CLOSURE;
-int FAST_RELOCALIZATION;
+int FAST_RELOCALIZATION;  
 
 camodocal::CameraPtr m_camera;
-Eigen::Vector3d tic;  // extrinsics
-Eigen::Matrix3d qic;
+// extrinsics, load from pose msg
+Eigen::Vector3d tic;  
+Eigen::Matrix3d qic;   
 
 std::string BRIEF_PATTERN_FILE;
 std::string POSE_GRAPH_SAVE_PATH;
 std::string VINS_RESULT_PATH;
 
 CameraPoseVisualization cameraposevisual(1, 0, 0, 1);
-Eigen::Vector3d last_t(-100, -100, -100);
+Eigen::Vector3d last_t(-100, -100, -100); // last position
 
 // ROS 
 ros::Publisher pub_match_img;
@@ -71,11 +85,11 @@ ros::Publisher pub_key_odometrys;
 ros::Publisher pub_vio_path;
 nav_msgs::Path no_loop_path;
 
-// used variables
+// unused variables
 // bool load_flag = 0;  // load pose graph flag
 
 
-// detect a new image sequence, input images discontinue
+// detect a new image sequence when input images discontinue or set manually
 void new_sequence() {
     printf("new sequence\n");
     sequence++;
@@ -173,7 +187,7 @@ void imu_forward_callback(const nav_msgs::Odometry::ConstPtr &forward_msg) {
         vio_q.y() = forward_msg->pose.pose.orientation.y;
         vio_q.z() = forward_msg->pose.pose.orientation.z;
 
-        //YJTODO: why transform three times?
+        //YJTODO: why transform two times before trans to IMU(cam?) coord sys?
         vio_t = posegraph.w_r_vio * vio_t + posegraph.w_t_vio;
         vio_q = posegraph.w_r_vio * vio_q;
 
@@ -200,9 +214,11 @@ void relo_relative_pose_callback(const nav_msgs::Odometry::ConstPtr &pose_msg) {
     relative_q.x() = pose_msg->pose.pose.orientation.x;
     relative_q.y() = pose_msg->pose.pose.orientation.y;
     relative_q.z() = pose_msg->pose.pose.orientation.z;
+
     double relative_yaw = pose_msg->twist.twist.linear.x;
     int index = pose_msg->twist.twist.linear.y;
     //printf("receive index %d \n", index );
+    
     Eigen::Matrix<double, 8, 1 > loop_info;
     loop_info << relative_t.x(), relative_t.y(), relative_t.z(),
                  relative_q.w(), relative_q.x(), relative_q.y(), relative_q.z(),
@@ -219,6 +235,7 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg) {
     vio_q.y() = pose_msg->pose.pose.orientation.y;
     vio_q.z() = pose_msg->pose.pose.orientation.z;
 
+    //YJTODO: why transform two times before trans to IMU(cam?) coord sys?
     vio_t = posegraph.w_r_vio * vio_t + posegraph.w_t_vio;
     vio_q = posegraph.w_r_vio *  vio_q;
 
@@ -237,9 +254,9 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg) {
     }
 
     odometry_buf.push(vio_t_cam);
-    if (odometry_buf.size() > 10) {
+    if (odometry_buf.size() > 10) {  //YJTODO: why save 10 frames in buf?
         odometry_buf.pop();
-    }
+    } // set a flag to avoid take .size()?
 
     visualization_msgs::Marker key_odometrys;
     key_odometrys.header = pose_msg->header;
@@ -258,6 +275,7 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg) {
     key_odometrys.color.r = 1.0;
     key_odometrys.color.a = 1.0;
 
+    // YJTODO: using another data structure to avoid repeated pop and push operations?
     for (unsigned int i = 0; i < odometry_buf.size(); i++) {
         geometry_msgs::Point pose_marker;
         Vector3d vio_t;
@@ -298,75 +316,70 @@ void extrinsic_callback(const nav_msgs::Odometry::ConstPtr &pose_msg) {
 }
 
 //YJTODO: route 2 
-void process()
-{
-    if (!LOOP_CLOSURE)
+void process() {
+    if (!LOOP_CLOSURE) {
         return;
-    while (true)
-    {
+    }
+    while (true) {
         sensor_msgs::ImageConstPtr image_msg = NULL;
         sensor_msgs::PointCloudConstPtr point_msg = NULL;
         nav_msgs::Odometry::ConstPtr pose_msg = NULL;
 
         // find out the messages with same time stamp
         m_buf.lock();
-        if(!image_buf.empty() && !point_buf.empty() && !pose_buf.empty())
-        {
-            if (image_buf.front()->header.stamp.toSec() > pose_buf.front()->header.stamp.toSec())
-            {
+        if(!image_buf.empty() && !point_buf.empty() && !pose_buf.empty()) {
+            // image must have corresponding pose and point info
+            if (image_buf.front()->header.stamp.toSec() > pose_buf.front()->header.stamp.toSec()) {
                 pose_buf.pop();
                 printf("throw pose at beginning\n");
-            }
-            else if (image_buf.front()->header.stamp.toSec() > point_buf.front()->header.stamp.toSec())
-            {
+            } else if (image_buf.front()->header.stamp.toSec() > point_buf.front()->header.stamp.toSec()) {
                 point_buf.pop();
                 printf("throw point at beginning\n");
-            }
-            else if (image_buf.back()->header.stamp.toSec() >= pose_buf.front()->header.stamp.toSec() 
-                && point_buf.back()->header.stamp.toSec() >= pose_buf.front()->header.stamp.toSec())
-            {
+            } else if (image_buf.back()->header.stamp.toSec() >= pose_buf.front()->header.stamp.toSec() 
+                && point_buf.back()->header.stamp.toSec() >= pose_buf.front()->header.stamp.toSec()) {
+                // each pose_msg should have corresponding image and point info
                 pose_msg = pose_buf.front();
                 pose_buf.pop();
-                while (!pose_buf.empty())
+                while (!pose_buf.empty()) {
                     pose_buf.pop();
-                while (image_buf.front()->header.stamp.toSec() < pose_msg->header.stamp.toSec())
+                } // YJTODO: why clear all other poses in buf?
+
+                while (image_buf.front()->header.stamp.toSec() < pose_msg->header.stamp.toSec()) {
                     image_buf.pop();
+                }
                 image_msg = image_buf.front();
                 image_buf.pop();
 
-                while (point_buf.front()->header.stamp.toSec() < pose_msg->header.stamp.toSec())
+                while (point_buf.front()->header.stamp.toSec() < pose_msg->header.stamp.toSec()) {
                     point_buf.pop();
+                }
                 point_msg = point_buf.front();
                 point_buf.pop();
             }
         }
         m_buf.unlock();
 
-        if (pose_msg != NULL)
-        {
+        if (pose_msg != NULL) {
             //printf(" pose time %f \n", pose_msg->header.stamp.toSec());
             //printf(" point time %f \n", point_msg->header.stamp.toSec());
             //printf(" image time %f \n", image_msg->header.stamp.toSec());
             // skip fisrt few
-            if (skip_first_cnt < SKIP_FIRST_CNT)
-            {
+            if (skip_first_cnt < SKIP_FIRST_CNT) {
                 skip_first_cnt++;
                 continue;
             }
 
-            if (skip_cnt < SKIP_CNT)
-            {
+            // freq ctrl
+            if (skip_cnt < SKIP_CNT) {
                 skip_cnt++;
                 continue;
-            }
-            else
-            {
+            } else {
                 skip_cnt = 0;
             }
 
+            // decode image_msg and transfer to cv::Mat
             cv_bridge::CvImageConstPtr ptr;
-            if (image_msg->encoding == "8UC1")
-            {
+            if (image_msg->encoding == "8UC1") {
                 sensor_msgs::Image img;
                 img.header = image_msg->header;
                 img.height = image_msg->height;
@@ -376,9 +389,9 @@ void process()
                 img.data = image_msg->data;
                 img.encoding = "mono8";
                 ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO8);
-            }
-            else
+            } else {
                 ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::MONO8);
+            }
             
             cv::Mat image = ptr->image;
             // build keyframe
@@ -389,15 +402,16 @@ void process()
                                      pose_msg->pose.pose.orientation.x,
                                      pose_msg->pose.pose.orientation.y,
                                      pose_msg->pose.pose.orientation.z).toRotationMatrix();
-            if((T - last_t).norm() > SKIP_DIS)
-            {
+            
+            // if trans fits some threshold
+            if((T - last_t).norm() > SKIP_DIS) {
+                // YJTODO: why not build a new class/struct to save or in class keyframe?
                 vector<cv::Point3f> point_3d; 
                 vector<cv::Point2f> point_2d_uv; 
                 vector<cv::Point2f> point_2d_normal;
-                vector<double> point_id;
+                vector<double> point_id;  // YJTODO: why id is in double?
 
-                for (unsigned int i = 0; i < point_msg->points.size(); i++)
-                {
+                for (unsigned int i = 0; i < point_msg->points.size(); i++) {
                     cv::Point3f p_3d;
                     p_3d.x = point_msg->points[i].x;
                     p_3d.y = point_msg->points[i].y;
@@ -414,14 +428,13 @@ void process()
                     point_2d_normal.push_back(p_2d_normal);
                     point_2d_uv.push_back(p_2d_uv);
                     point_id.push_back(p_id);
-
                     //printf("u %f, v %f \n", p_2d_uv.x, p_2d_uv.y);
                 }
 
                 KeyFrame* keyframe = new KeyFrame(pose_msg->header.stamp.toSec(), frame_index, T, R, image,
                                    point_3d, point_2d_uv, point_2d_normal, point_id, sequence);   
                 m_process.lock();
-                start_flag = 1;
+                // start_flag = 1;
                 posegraph.addKeyFrame(keyframe, 1);
                 m_process.unlock();
                 frame_index++;
@@ -434,6 +447,7 @@ void process()
     }
 }
 
+// wait for loading/saving pose graph or start new sequence
 void command() {
     if (!LOOP_CLOSURE) {
         return;
@@ -444,7 +458,7 @@ void command() {
             m_process.lock();
             posegraph.savePoseGraph();
             m_process.unlock();
-            printf("save pose graph finish\nyou can set 'load_previous_pose_graph' to 1 in the config file to reuse it next time\n");
+            printf("save pose graph finish \n you can set 'load_previous_pose_graph' to 1 in the config file to reuse it next time\n");
             // printf("program shutting down...\n");
             // ros::shutdown();
         }
@@ -461,25 +475,26 @@ int main(int argc, char **argv) {
     ros::NodeHandle n("~");
     posegraph.registerPub(n);
 
-    // read param
-    // YJTODO: print out to see init value
+    // read 5 params from euroc.launch
+    // YJTODO: print out to check init value
     n.getParam("visualization_shift_x", VISUALIZATION_SHIFT_X); // 0
     n.getParam("visualization_shift_y", VISUALIZATION_SHIFT_Y); // 0
     n.getParam("skip_cnt", SKIP_CNT);                           // 0
     n.getParam("skip_dis", SKIP_DIS);                           // 0
     std::string config_file;
     n.getParam("config_file", config_file);
+
     cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
     if(!fsSettings.isOpened()) {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
     }
-    // visualization settings
+    // visualization settings, marker size and line size
     double camera_visual_size = fsSettings["visualize_camera_size"];
     cameraposevisual.setScale(camera_visual_size);
     cameraposevisual.setLineWidth(camera_visual_size / 10.0);
 
-    LOOP_CLOSURE = fsSettings["loop_closure"];
     std::string IMAGE_TOPIC;
+    LOOP_CLOSURE = fsSettings["loop_closure"];
     int LOAD_PREVIOUS_POSE_GRAPH;
     if (LOOP_CLOSURE) {
         ROW = fsSettings["image_height"];
@@ -504,7 +519,8 @@ int main(int argc, char **argv) {
 
         VISUALIZE_IMU_FORWARD = fsSettings["visualize_imu_forward"];
         LOAD_PREVIOUS_POSE_GRAPH = fsSettings["load_previous_pose_graph"];
-        FAST_RELOCALIZATION = fsSettings["fast_relocalization"];
+        FAST_RELOCALIZATION = fsSettings["fast_relocalization"];  // YJTODO: how to achieve `fast`?
+
         VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
         std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
         fout.close();
@@ -534,6 +550,7 @@ int main(int argc, char **argv) {
     ros::Subscriber sub_point = n.subscribe("/vins_estimator/keyframe_point", 2000, point_callback);
     ros::Subscriber sub_relo_relative_pose = n.subscribe("/vins_estimator/relo_relative_pose", 2000, relo_relative_pose_callback);
 
+    // YJTODO: make clear all output messages correponding to which variables in visualization module
     pub_match_img = n.advertise<sensor_msgs::Image>("match_image", 1000);
     pub_camera_pose_visual = n.advertise<visualization_msgs::MarkerArray>("camera_pose_visual", 1000);
     pub_key_odometrys = n.advertise<visualization_msgs::Marker>("key_odometrys", 1000);
