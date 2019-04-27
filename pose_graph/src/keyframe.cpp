@@ -1,43 +1,77 @@
 #include "keyframe.h"
 
+// YJTODO: how about modify reduceVector in FeatureTracker module with template
+// YJTODO: which should be moved to a common script, like SomeUtils.cpp
 template <typename Derived>
-static void reduceVector(vector<Derived> &v, vector<uchar> status)
-{
+static void reduceVector(vector<Derived> &v, vector<uchar> status) {
     int j = 0;
-    for (int i = 0; i < int(v.size()); i++)
-        if (status[i])
+    for (int i = 0; i < int(v.size()); i++) {
+        if (status[i]) {
             v[j++] = v[i];
+		}
+	}
     v.resize(j);
 }
 
+/*****************************************/
+void BriefExtractor::operator() (const cv::Mat &im, vector<cv::KeyPoint> &keys, vector<BRIEF::bitset> &descriptors) const {
+  m_brief.compute(im, keys, descriptors);
+}
+
+BriefExtractor::BriefExtractor(const std::string &pattern_file) {
+  // The DVision::BRIEF extractor computes a random pattern by default when
+  // the object is created.
+  // We load the pattern that we used to build the vocabulary, to make
+  // the descriptors compatible with the predefined vocabulary
+
+  // loads the pattern
+  cv::FileStorage fs(pattern_file.c_str(), cv::FileStorage::READ);
+  if(!fs.isOpened()) throw string("Could not open file ") + pattern_file;
+
+  vector<int> x1, y1, x2, y2;
+  fs["x1"] >> x1;
+  fs["x2"] >> x2;
+  fs["y1"] >> y1;
+  fs["y2"] >> y2;
+
+  m_brief.importPairs(x1, y1, x2, y2);
+}
+
+
+/*****************************************/
 // create keyframe online
 KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3d &_vio_R_w_i, cv::Mat &_image,
 		           vector<cv::Point3f> &_point_3d, vector<cv::Point2f> &_point_2d_uv, vector<cv::Point2f> &_point_2d_norm,
-		           vector<double> &_point_id, int _sequence)
-{
+		           vector<double> &_point_id, int _sequence) {
 	time_stamp = _time_stamp;
 	index = _index;
+
 	vio_T_w_i = _vio_T_w_i;
 	vio_R_w_i = _vio_R_w_i;
 	T_w_i = vio_T_w_i;
 	R_w_i = vio_R_w_i;
 	origin_vio_T = vio_T_w_i;		
 	origin_vio_R = vio_R_w_i;
+
 	image = _image.clone();
-	cv::resize(image, thumbnail, cv::Size(80, 60));
+	cv::resize(image, thumbnail, cv::Size(80, 60));  // YJTODO: why set 80/60?
 	point_3d = _point_3d;
 	point_2d_uv = _point_2d_uv;
 	point_2d_norm = _point_2d_norm;
 	point_id = _point_id;
+
+	has_fast_point = false;
+	sequence = _sequence;
 	has_loop = false;
 	loop_index = -1;
-	has_fast_point = false;
 	loop_info << 0, 0, 0, 0, 0, 0, 0, 0;
-	sequence = _sequence;
+	
 	computeWindowBRIEFPoint();
 	computeBRIEFPoint();
-	if(!DEBUG_IMAGE)
+	
+	if(!DEBUG_IMAGE) {
 		image.release();
+	}
 }
 
 // load previous keyframe
@@ -71,12 +105,9 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	brief_descriptors = _brief_descriptors;
 }
 
-
-void KeyFrame::computeWindowBRIEFPoint()
-{
+void KeyFrame::computeWindowBRIEFPoint() {
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
-	for(int i = 0; i < (int)point_2d_uv.size(); i++)
-	{
+	for(int i = 0; i < static_cast<int>(point_2d_uv.size()); i++) {
 	    cv::KeyPoint key;
 	    key.pt = point_2d_uv[i];
 	    window_keypoints.push_back(key);
@@ -84,37 +115,29 @@ void KeyFrame::computeWindowBRIEFPoint()
 	extractor(image, window_keypoints, window_brief_descriptors);
 }
 
-void KeyFrame::computeBRIEFPoint()
-{
+void KeyFrame::computeBRIEFPoint() {
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
+	// YJTODO: hard code here, extract to handle?
 	const int fast_th = 20; // corner detector response threshold
-	if(1)
+	if(1) {
 		cv::FAST(image, keypoints, fast_th, true);
-	else
-	{
+	} else {
 		vector<cv::Point2f> tmp_pts;
 		cv::goodFeaturesToTrack(image, tmp_pts, 500, 0.01, 10);
-		for(int i = 0; i < (int)tmp_pts.size(); i++)
-		{
+		for(int i = 0; i < (int)tmp_pts.size(); i++) {
 		    cv::KeyPoint key;
 		    key.pt = tmp_pts[i];
 		    keypoints.push_back(key);
 		}
 	}
 	extractor(image, keypoints, brief_descriptors);
-	for (int i = 0; i < (int)keypoints.size(); i++)
-	{
+	for (int i = 0; i < (int)keypoints.size(); i++) {
 		Eigen::Vector3d tmp_p;
 		m_camera->liftProjective(Eigen::Vector2d(keypoints[i].pt.x, keypoints[i].pt.y), tmp_p);
 		cv::KeyPoint tmp_norm;
 		tmp_norm.pt = cv::Point2f(tmp_p.x()/tmp_p.z(), tmp_p.y()/tmp_p.z());
 		keypoints_norm.push_back(tmp_norm);
 	}
-}
-
-void BriefExtractor::operator() (const cv::Mat &im, vector<cv::KeyPoint> &keys, vector<BRIEF::bitset> &descriptors) const
-{
-  m_brief.compute(im, keys, descriptors);
 }
 
 
@@ -575,26 +598,6 @@ void KeyFrame::updateLoop(Eigen::Matrix<double, 8, 1 > &_loop_info)
 		//printf("update loop info\n");
 		loop_info = _loop_info;
 	}
-}
-
-BriefExtractor::BriefExtractor(const std::string &pattern_file)
-{
-  // The DVision::BRIEF extractor computes a random pattern by default when
-  // the object is created.
-  // We load the pattern that we used to build the vocabulary, to make
-  // the descriptors compatible with the predefined vocabulary
-
-  // loads the pattern
-  cv::FileStorage fs(pattern_file.c_str(), cv::FileStorage::READ);
-  if(!fs.isOpened()) throw string("Could not open file ") + pattern_file;
-
-  vector<int> x1, y1, x2, y2;
-  fs["x1"] >> x1;
-  fs["x2"] >> x2;
-  fs["y1"] >> y1;
-  fs["y2"] >> y2;
-
-  m_brief.importPairs(x1, y1, x2, y2);
 }
 
 

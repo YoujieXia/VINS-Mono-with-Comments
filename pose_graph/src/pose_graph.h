@@ -2,18 +2,21 @@
 
 #include <thread>
 #include <mutex>
-#include <opencv2/opencv.hpp>
-#include <eigen3/Eigen/Dense>
 #include <string>
-#include <ceres/ceres.h>
-#include <ceres/rotation.h>
 #include <queue>
 #include <assert.h>
+#include <stdio.h>
+
+#include <opencv2/opencv.hpp>
+#include <eigen3/Eigen/Dense>
+#include <ceres/ceres.h>
+#include <ceres/rotation.h>
+
+#include <ros/ros.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PointStamped.h>
 #include <nav_msgs/Odometry.h>
-#include <stdio.h>
-#include <ros/ros.h>
+
 #include "keyframe.h"
 #include "utility/tic_toc.h"
 #include "utility/utility.h"
@@ -32,52 +35,59 @@
 using namespace DVision;
 using namespace DBoW2;
 
+// YJTODO: order of variables should be consitent with constructor
 class PoseGraph {
 public:
 	PoseGraph();
 	~PoseGraph();
-	void registerPub(ros::NodeHandle &n);
-	void addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
-	void loadKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
-	void loadVocabulary(std::string voc_path);
-	void updateKeyFrameLoop(int index, Eigen::Matrix<double, 8, 1 > &_loop_info);
-	KeyFrame* getKeyFrame(int index);
-	nav_msgs::Path path[10];
-	nav_msgs::Path base_path;
-	CameraPoseVisualization* posegraph_visualization;
+
+	void registerPub(ros::NodeHandle &n);  // YJTODO: read path from what? to init all ros::Publishers
+	void publish();  // publish path to ros::Publisher pub_pose_graph;
 	void savePoseGraph();
 	void loadPoseGraph();
-	void publish();
-	double yaw_drift;
+	void loadVocabulary(std::string voc_path);
 
-	// YJTODO: mean?
+	// keyframe management
+	void addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
+	void loadKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
+	void updateKeyFrameLoop(int index, Eigen::Matrix<double, 8, 1 > &_loop_info);
+	KeyFrame* getKeyFrame(int index);
+
+	CameraPoseVisualization* posegraph_visualization;
+
+	double yaw_drift;
+	// YJTODO: mean? to record lost drifts?
 	Matrix3d r_drift;
 	Vector3d t_drift;
-	// world frame( base sequence or first sequence)<----> cur sequence frame  
+	// world frame( base sequence or first sequence) <----> cur sequence frame  
 	Matrix3d w_r_vio;
 	Vector3d w_t_vio;
-	
 
+	nav_msgs::Path path[10];
+	nav_msgs::Path base_path;
 
 private:
 	int detectLoop(KeyFrame* keyframe, int frame_index);
 	void addKeyFrameIntoVoc(KeyFrame* keyframe);
 	void optimize4DoF();
 	void updatePath();
-	list<KeyFrame*> keyframelist;
+
 	std::mutex m_keyframelist;
 	std::mutex m_optimize_buf;
 	std::mutex m_path;
 	std::mutex m_drift;
-	std::thread t_optimization;
+
+	std::thread t_optimization;  // for 4DOF optimization
 	std::queue<int> optimize_buf;
 
+	map<int, cv::Mat> image_pool;
+	list<KeyFrame*> keyframelist;
+
+	int earliest_loop_index;
 	int global_index;
+	int base_sequence;
 	int sequence_cnt;
 	vector<bool> sequence_loop;
-	map<int, cv::Mat> image_pool;
-	int earliest_loop_index;
-	int base_sequence;
 
 	BriefDatabase db;
 	BriefVocabulary* voc;

@@ -1,48 +1,53 @@
 #include "pose_graph.h"
 
-PoseGraph::PoseGraph()
-{
+PoseGraph::PoseGraph() {
     posegraph_visualization = new CameraPoseVisualization(1.0, 0.0, 1.0, 1.0);
     posegraph_visualization->setScale(0.1);
     posegraph_visualization->setLineWidth(0.01);
-	t_optimization = std::thread(&PoseGraph::optimize4DoF, this);
-    earliest_loop_index = -1;
-    t_drift = Eigen::Vector3d(0, 0, 0);
+
     yaw_drift = 0;
+    t_drift = Eigen::Vector3d(0, 0, 0);
     r_drift = Eigen::Matrix3d::Identity();
     w_t_vio = Eigen::Vector3d(0, 0, 0);
     w_r_vio = Eigen::Matrix3d::Identity();
+
+    t_optimization = std::thread(&PoseGraph::optimize4DoF, this);
+
+    earliest_loop_index = -1;
     global_index = 0;
+    base_sequence = 1;
     sequence_cnt = 0;
     sequence_loop.push_back(0);
-    base_sequence = 1;
+    
+    voc = nullptr;
 }
 
 PoseGraph::~PoseGraph() {
 	t_optimization.join();
 }
 
+// YJTODO: what these four advertise correpsonds to former modules
 void PoseGraph::registerPub(ros::NodeHandle &n) {
     pub_pg_path = n.advertise<nav_msgs::Path>("pose_graph_path", 1000);
     pub_base_path = n.advertise<nav_msgs::Path>("base_path", 1000);
     pub_pose_graph = n.advertise<visualization_msgs::MarkerArray>("pose_graph", 1000);
-    for (int i = 1; i < 10; i++)
+    for (int i = 1; i < 10; i++) {
         pub_path[i] = n.advertise<nav_msgs::Path>("path_" + to_string(i), 1000);
+    }
 }
 
+// YJTODO:
 void PoseGraph::loadVocabulary(std::string voc_path)
 {
     voc = new BriefVocabulary(voc_path);
     db.setVocabulary(*voc, false, 0);
 }
 
-void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
-{
+void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop) {
     //shift to base frame
     Vector3d vio_P_cur;
     Matrix3d vio_R_cur;
-    if (sequence_cnt != cur_kf->sequence)
-    {
+    if (sequence_cnt != cur_kf->sequence) {
         sequence_cnt++;
         sequence_loop.push_back(0);
         w_t_vio = Eigen::Vector3d(0, 0, 0);
@@ -60,24 +65,21 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
     cur_kf->index = global_index;
     global_index++;
 	int loop_index = -1;
-    if (flag_detect_loop)
-    {
-        TicToc tmp_t;
+    if (flag_detect_loop) {
+        // TicToc tmp_t;
         loop_index = detectLoop(cur_kf, cur_kf->index);
-    }
-    else
-    {
+    } else {
         addKeyFrameIntoVoc(cur_kf);
     }
-	if (loop_index != -1)
-	{
+    // if find loop
+	if (loop_index != -1) {
         //printf(" %d detect loop with %d \n", cur_kf->index, loop_index);
         KeyFrame* old_kf = getKeyFrame(loop_index);
 
-        if (cur_kf->findConnection(old_kf))
-        {
-            if (earliest_loop_index > loop_index || earliest_loop_index == -1)
+        if (cur_kf->findConnection(old_kf)) {
+            if (earliest_loop_index > loop_index || earliest_loop_index == -1) {
                 earliest_loop_index = loop_index;
+            }
 
             Vector3d w_P_old, w_P_cur, vio_P_cur;
             Matrix3d w_R_old, w_R_cur, vio_R_cur;
@@ -309,7 +311,7 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         putText(compressed_image, "feature_num:" + to_string(feature_num), cv::Point2f(10, 10), CV_FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255));
         image_pool[frame_index] = compressed_image;
     }
-    TicToc tmp_t;
+    // TicToc tmp_t;
     //first query; then add this frame into database!
     QueryResults ret;
     TicToc t_query;
@@ -414,7 +416,7 @@ void PoseGraph::optimize4DoF()
         if (cur_index != -1)
         {
             printf("optimize pose graph \n");
-            TicToc tmp_t;
+            // TicToc tmp_t;
             m_keyframelist.lock();
             KeyFrame* cur_kf = getKeyFrame(cur_index);
 
@@ -694,7 +696,7 @@ void PoseGraph::updatePath()
 void PoseGraph::savePoseGraph()
 {
     m_keyframelist.lock();
-    TicToc tmp_t;
+    // TicToc tmp_t;
     FILE *pFile;
     printf("pose graph path: %s\n",POSE_GRAPH_SAVE_PATH.c_str());
     printf("pose graph saving... \n");
@@ -743,12 +745,12 @@ void PoseGraph::savePoseGraph()
     }
     fclose(pFile);
 
-    printf("save pose graph time: %f s\n", tmp_t.toc() / 1000);
+    // printf("save pose graph time: %f s\n", tmp_t.toc() / 1000);
     m_keyframelist.unlock();
 }
 void PoseGraph::loadPoseGraph()
 {
-    TicToc tmp_t;
+    // TicToc tmp_t;
     FILE * pFile;
     string file_path = POSE_GRAPH_SAVE_PATH + "pose_graph.txt";
     printf("lode pose graph from: %s \n", file_path.c_str());
@@ -862,17 +864,14 @@ void PoseGraph::loadPoseGraph()
         cnt++;
     }
     fclose (pFile);
-    printf("load pose graph time: %f s\n", tmp_t.toc()/1000);
+    // printf("load pose graph time: %f s\n", tmp_t.toc()/1000);
     base_sequence = 0;
 }
 
-void PoseGraph::publish()
-{
-    for (int i = 1; i <= sequence_cnt; i++)
-    {
+void PoseGraph::publish() {
+    for (int i = 1; i <= sequence_cnt; i++) {
         //if (sequence_loop[i] == true || i == base_sequence)
-        if (1 || i == base_sequence)
-        {
+        if (1 || i == base_sequence) {
             pub_pg_path.publish(path[i]);
             pub_path[i].publish(path[i]);
             posegraph_visualization->publish_by(pub_pose_graph, path[sequence_cnt].header);

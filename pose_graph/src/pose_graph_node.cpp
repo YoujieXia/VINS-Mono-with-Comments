@@ -100,6 +100,7 @@ void new_sequence() {
     }
     posegraph.posegraph_visualization->reset();
     posegraph.publish();
+    
     m_buf.lock();
     while(!image_buf.empty()) {
         image_buf.pop();
