@@ -15,10 +15,10 @@
 #include <sensor_msgs/image_encodings.h>
 #include <visualization_msgs/Marker.h>
 #include <std_msgs/Bool.h>
+#include <cv_bridge/cv_bridge.h>
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/eigen.hpp>
-#include <cv_bridge/cv_bridge.h>
 
 #include <eigen3/Eigen/Dense>
 
@@ -47,7 +47,7 @@ int frame_index = 0;  // detected keyframe index
 int sequence = 1;   //number of independent sequence
 
 int skip_first_cnt = 0; // used in local, with SKIP_FIRST_CNT, only once it achieves
-int SKIP_CNT;  // read from config::skip_cnt
+int SKIP_CNT;  // read from euroc.launch::skip_cnt
 int skip_cnt = 0; // with SKIP_CNT to ctrl freq, in loop
 
 // bool start_flag = 0;  // successfully detect the first keyframe
@@ -361,9 +361,9 @@ void process() {
         m_buf.unlock();
 
         if (pose_msg != NULL) {
-            //printf(" pose time %f \n", pose_msg->header.stamp.toSec());
-            //printf(" point time %f \n", point_msg->header.stamp.toSec());
-            //printf(" image time %f \n", image_msg->header.stamp.toSec());
+            printf(" pose time %f \n", pose_msg->header.stamp.toSec());
+            printf(" point time %f \n", point_msg->header.stamp.toSec());
+            printf(" image time %f \n", image_msg->header.stamp.toSec());
             // skip fisrt few
             if (skip_first_cnt < SKIP_FIRST_CNT) {
                 skip_first_cnt++;
@@ -394,8 +394,9 @@ void process() {
                 ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::MONO8);
             }
             
+            /* build keyframe */
             cv::Mat image = ptr->image;
-            // build keyframe
+            // recover keyframe pose
             Vector3d T = Vector3d(pose_msg->pose.pose.position.x,
                                   pose_msg->pose.pose.position.y,
                                   pose_msg->pose.pose.position.z);
@@ -404,7 +405,7 @@ void process() {
                                      pose_msg->pose.pose.orientation.y,
                                      pose_msg->pose.pose.orientation.z).toRotationMatrix();
             
-            // if trans fits some threshold
+            // if trans fits a threshold (move at least SKIP_DIS distance)
             if((T - last_t).norm() > SKIP_DIS) {
                 // YJTODO: why not build a new class/struct to save or in class keyframe?
                 vector<cv::Point3f> point_3d; 
@@ -412,6 +413,7 @@ void process() {
                 vector<cv::Point2f> point_2d_normal;
                 vector<double> point_id;  // YJTODO: why id is in double?
 
+                // pack 2D point infomation
                 for (unsigned int i = 0; i < point_msg->points.size(); i++) {
                     cv::Point3f p_3d;
                     p_3d.x = point_msg->points[i].x;
@@ -432,6 +434,7 @@ void process() {
                     //printf("u %f, v %f \n", p_2d_uv.x, p_2d_uv.y);
                 }
 
+                // YJTODO:: mopdify memory allocation
                 KeyFrame* keyframe = new KeyFrame(pose_msg->header.stamp.toSec(), frame_index, T, R, image,
                                    point_3d, point_2d_uv, point_2d_normal, point_id, sequence);   
                 m_process.lock();
@@ -441,12 +444,12 @@ void process() {
                 frame_index++;
                 last_t = T;
             }
-        }
+        } /* end of if (pose_msg != NULL) */
 
         std::chrono::milliseconds dura(5);
         std::this_thread::sleep_for(dura);
-    }
-}
+    } /* end of while (true) */
+} /* end of void process() */
 
 // wait for loading/saving pose graph or start new sequence
 void command() {
@@ -508,6 +511,7 @@ int main(int argc, char **argv) {
         BRIEF_PATTERN_FILE = pkg_path + "/../support_files/brief_pattern.yml";
         cout << "BRIEF_PATTERN_FILE" << BRIEF_PATTERN_FILE << endl;
         m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(config_file.c_str());
+        // YJTODO: should enter camera model to confirm the input data 
 
         fsSettings["image_topic"] >> IMAGE_TOPIC;        
         fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;

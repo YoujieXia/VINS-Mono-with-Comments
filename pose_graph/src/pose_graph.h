@@ -41,19 +41,19 @@ public:
 	PoseGraph();
 	~PoseGraph();
 
-	void registerPub(ros::NodeHandle &n);  // YJTODO: read path from what? to init all ros::Publishers
+	void registerPub(ros::NodeHandle &n);  // YJTODO: read path from euroc.launch to init all ros::Publishers
 	void publish();  // publish path to ros::Publisher pub_pose_graph;
 	void savePoseGraph();
 	void loadPoseGraph();
 	void loadVocabulary(std::string voc_path);
 
 	// keyframe management
-	void addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
 	void loadKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
+	void addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop);
 	void updateKeyFrameLoop(int index, Eigen::Matrix<double, 8, 1 > &_loop_info);
 	KeyFrame* getKeyFrame(int index);
 
-	CameraPoseVisualization* posegraph_visualization;
+	CameraPoseVisualization* posegraph_visualization;　　// for visualization purposes
 
 	double yaw_drift;
 	// YJTODO: mean? to record lost drifts?
@@ -63,7 +63,7 @@ public:
 	Matrix3d w_r_vio;
 	Vector3d w_t_vio;
 
-	nav_msgs::Path path[10];
+	nav_msgs::Path path[10];  // YJTODO: why 10? sequence_cnt is 5
 	nav_msgs::Path base_path;
 
 private:
@@ -72,13 +72,13 @@ private:
 	void optimize4DoF();
 	void updatePath();
 
-	std::mutex m_keyframelist;
+	std::mutex m_keyframelist; // used in savePoseGraph(), 
 	std::mutex m_optimize_buf;
 	std::mutex m_path;
 	std::mutex m_drift;
 
 	std::thread t_optimization;  // for 4DOF optimization
-	std::queue<int> optimize_buf;
+	std::queue<int> optimize_buf;// optimized keyframe index
 
 	map<int, cv::Mat> image_pool;
 	list<KeyFrame*> keyframelist;
@@ -89,8 +89,8 @@ private:
 	int sequence_cnt;
 	vector<bool> sequence_loop;
 
-	BriefDatabase db;
-	BriefVocabulary* voc;
+	BriefDatabase db;		// descriptor database
+	BriefVocabulary* voc;　　// input descriptor vocabulary
 
 	ros::Publisher pub_pg_path;
 	ros::Publisher pub_base_path;

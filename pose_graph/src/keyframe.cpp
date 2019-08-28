@@ -13,7 +13,7 @@ static void reduceVector(vector<Derived> &v, vector<uchar> status) {
     v.resize(j);
 }
 
-/*****************************************/
+/***************************************** class BriefExtractor *****************************************/
 void BriefExtractor::operator() (const cv::Mat &im, vector<cv::KeyPoint> &keys, vector<BRIEF::bitset> &descriptors) const {
   m_brief.compute(im, keys, descriptors);
 }
@@ -38,7 +38,7 @@ BriefExtractor::BriefExtractor(const std::string &pattern_file) {
 }
 
 
-/*****************************************/
+/***************************************** class KeyFrame *****************************************/
 // create keyframe online
 KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3d &_vio_R_w_i, cv::Mat &_image,
 		           vector<cv::Point3f> &_point_3d, vector<cv::Point2f> &_point_2d_uv, vector<cv::Point2f> &_point_2d_norm,

@@ -49,7 +49,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop) {
     Matrix3d vio_R_cur;
     if (sequence_cnt != cur_kf->sequence) {
         sequence_cnt++;
-        sequence_loop.push_back(0);
+        sequence_loop.push_back(0); // YJTODO: why push_back 0 each time?
         w_t_vio = Eigen::Vector3d(0, 0, 0);
         w_r_vio = Eigen::Matrix3d::Identity();
         m_drift.lock();
@@ -206,7 +206,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop) {
 	keyframelist.push_back(cur_kf);
     publish();
 	m_keyframelist.unlock();
-}
+} /* end of void PoseGraph::addKeyFrame() */
 
 
 void PoseGraph::loadKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
